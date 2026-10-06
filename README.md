@@ -112,7 +112,7 @@ JDBC_URL = (
 | 資料庫的值 | DataFrame 裡的值 |
 |---|---|
 | 數值 | 數值 |
-| NULL | `None`（數值欄位為 `NaN`） |
+| NULL | 缺值（`None` 或 `NaN`，依 pandas 版本而定，請用 `pd.isna()` 判斷） |
 | 文字、日期、時間 | 去除前後空白的字串 |
 
 傳入 `all_str=True` 會把所有欄位都轉成字串（0.1.x 的行為）。

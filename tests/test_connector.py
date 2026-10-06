@@ -14,10 +14,21 @@ from redshift_connector_bade import RedshiftClient, connector, fetch_data_from_r
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+class JavaString:
+    """JDBC 回傳的文字是 java.lang.String 物件，不是 Python 的 str。"""
+
+    def __init__(self, value):
+        self._value = value
+
+    def __str__(self):
+        return self._value
+
+
 COLUMNS = [" model ", "qty", "price", "note", "tags"]
 ROWS = [
-    (" A1 ", 1, 1.5, None, ("x ", " y")),
-    ("B2", 2, None, " z ", None),
+    (JavaString(" A1 "), 1, 1.5, None, (JavaString("x "), JavaString(" y"))),
+    (JavaString("B2"), 2, None, JavaString(" z "), None),
 ]
 
 
@@ -79,8 +90,9 @@ def test_query_keeps_numbers_and_none(db):
     assert df["qty"].tolist() == [1, 2]
     assert pd.api.types.is_numeric_dtype(df["price"])
     assert df["price"][0] == 1.5 and math.isnan(df["price"][1])
-    assert df["note"].tolist() == [None, "z"]
-    assert df["tags"].tolist() == ["xy", None]
+    # NULL 維持缺值；實際是 None 還是 NaN 由 pandas 版本決定
+    assert pd.isna(df["note"][0]) and df["note"][1] == "z"
+    assert df["tags"][0] == "xy" and pd.isna(df["tags"][1])
 
 
 def test_all_str_matches_0_1_behaviour(db):
