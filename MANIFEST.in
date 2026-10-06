@@ -1,0 +1,2 @@
+include LICENSE README.md
+recursive-include redshift_connector_bade/jars *.jar *.txt

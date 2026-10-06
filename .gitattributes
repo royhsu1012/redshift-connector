@@ -1,0 +1,3 @@
+# cmd.exe needs CRLF; keep the file byte-for-byte so zip and raw downloads work too
+*.bat -text
+*.jar binary

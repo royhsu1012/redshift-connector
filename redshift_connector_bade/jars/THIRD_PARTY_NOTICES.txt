@@ -1,0 +1,19 @@
+The .jar files in this directory are the unmodified contents of Amazon's
+official Redshift JDBC driver distribution:
+
+  redshift-jdbc42-2.1.0.33.zip
+  https://docs.aws.amazon.com/redshift/latest/mgmt/jdbc20-download-driver.html
+
+They are redistributed here so the package works without a separate download.
+Each library remains under its own license:
+
+  redshift-jdbc42                Apache License 2.0 (includes PostgreSQL JDBC code, BSD 2-Clause)
+  aws-java-sdk-*                 Apache License 2.0
+  httpclient, httpcore           Apache License 2.0
+  commons-codec, commons-logging Apache License 2.0
+  jackson-*                      Apache License 2.0
+  joda-time                      Apache License 2.0
+  jsoup                          MIT License
+
+License and notice files shipped by the upstream projects are kept inside each
+jar under META-INF/.
