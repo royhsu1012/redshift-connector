@@ -73,21 +73,51 @@ def _clean_cell(x):
     return str(x).strip()
 
 
-def _clean_cell_as_str(x):
-    """0.1.x 的清理方式：一律轉成字串。"""
-    if isinstance(x, (tuple, list)):
-        return ''.join([str(i).strip() for i in x])
-    return str(x).strip()
+def _to_series(values):
+    """
+    把一欄資料轉成 Series：全是數值的欄位用數值型別（NULL 為 NaN），
+    其餘一律是 object 型別，內容為字串與 None。
+
+    文字欄不交給 pandas 自行推斷：pandas 3 會把 None 變成 NaN、型別變成 str，
+    同一段程式的結果會隨安裝的 pandas 版本而不同。
+    """
+    raw = pd.Series(list(values), dtype=object)
+    numeric = raw.infer_objects()
+    if pd.api.types.is_numeric_dtype(numeric):
+        return numeric
+    return pd.Series([_clean_cell(x) for x in raw], dtype=object)
 
 
-def _to_dataframe(rows, columns, all_str=False):
-    df = pd.DataFrame(rows, columns=columns)
-    for column in df.columns:
-        if all_str:
-            df[column] = df[column].apply(_clean_cell_as_str)
-        elif not pd.api.types.is_numeric_dtype(df[column]):
-            df[column] = df[column].apply(_clean_cell)
-    return df
+def _from_series(series):
+    # 欄位先以位置編號，最後才套上欄名：查詢結果有重複欄名時不會互相覆蓋
+    return pd.DataFrame(dict(enumerate(series)))
+
+
+def _to_dataframe(rows, n_columns):
+    cells = list(zip(*rows)) if rows else [()] * n_columns
+    return _from_series([_to_series(values) for values in cells])
+
+
+def _concat_chunks(parts):
+    """
+    合併分批讀取的結果。
+
+    各批次是分開判斷型別的：數值欄若在某一批剛好整欄都是 NULL，那一批會被當成文字欄。
+    同一欄在各批次的型別不一致時，把值攤平重新判斷一次，結果才會和一次讀完相同。
+    """
+    series = []
+    for i in parts[0].columns:
+        chunks = [part[i] for part in parts]
+        if len({chunk.dtype for chunk in chunks}) == 1:
+            series.append(pd.concat(chunks, ignore_index=True))
+        else:
+            series.append(_to_series([x for chunk in chunks for x in chunk]))
+    return _from_series(series)
+
+
+def _all_str(df):
+    """0.1.x 的輸出格式：每一格都轉成字串（NULL 是 'None'，數值欄的 NULL 是 'nan'）。"""
+    return _from_series([pd.Series([str(x) for x in df[i]], dtype=object) for i in df.columns])
 
 
 class RedshiftClient:
@@ -109,6 +139,9 @@ class RedshiftClient:
         self._conn = None
 
     def connect(self):
+        # 連線可能已被伺服器中斷（閒置過久、登入逾期）；失效就重新連線
+        if self._conn is not None and not self._conn.jconn.isValid(5):
+            self._conn = None
         if self._conn is None:
             _start_jvm(self._jvm_path, self._jars)
             self._conn = jaydebeapi.connect(DRIVER_CLASS, self.jdbc_url, [], self._jars)
@@ -122,6 +155,9 @@ class RedshiftClient:
         chunk_size: 分批讀取的筆數；資料量大時可降低記憶體用量，省略則一次取回
         verbose: 是否印出已讀取的筆數
         all_str: True 時所有欄位都轉成字串（0.1.x 的行為）
+
+        數值欄位為數值型別（NULL 為 NaN）；其餘欄位為去除前後空白的字串（NULL 為 None）。
+        結果不受 pandas 版本、是否分批讀取影響。
         """
         cursor = self.connect().cursor()
         try:
@@ -133,20 +169,23 @@ class RedshiftClient:
             columns = [str(desc[0]).strip() for desc in cursor.description]
 
             if not chunk_size:
-                return _to_dataframe(cursor.fetchall(), columns, all_str)
+                df = _to_dataframe(cursor.fetchall(), len(columns))
+            else:
+                parts, n = [], 0
+                while True:
+                    rows = cursor.fetchmany(chunk_size)
+                    if not rows:
+                        break
+                    parts.append(_to_dataframe(rows, len(columns)))
+                    n += len(rows)
+                    if verbose:
+                        print(f"已取 {n:,} 筆", flush=True)
+                df = _concat_chunks(parts) if parts else _to_dataframe([], len(columns))
 
-            parts, n = [], 0
-            while True:
-                rows = cursor.fetchmany(chunk_size)
-                if not rows:
-                    break
-                parts.append(_to_dataframe(rows, columns, all_str))
-                n += len(rows)
-                if verbose:
-                    print(f"已取 {n:,} 筆", flush=True)
-            if not parts:
-                return pd.DataFrame(columns=columns)
-            return pd.concat(parts, ignore_index=True)
+            if all_str:
+                df = _all_str(df)
+            df.columns = columns
+            return df
         finally:
             cursor.close()
 

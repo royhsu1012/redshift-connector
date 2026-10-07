@@ -11,6 +11,8 @@
 - `RedshiftClient`：多次查詢共用一條連線，瀏覽器登入只需要一次
 - `query_redshift(jdbc_url, query)`：一行完成查詢
 - `chunk_size` 分批讀取大量資料
+- 查詢結果的欄位型別固定：不受 pandas 2 / 3 與是否分批讀取影響，重複的欄名也會保留
+- 連線被伺服器中斷時，下一次查詢自動重新連線
 - `python -m redshift_connector_bade`：安裝自我檢查，可加上 JDBC URL 測試連線
 - `install.bat`：Windows 一鍵安裝
 - 自動化測試與 GitHub Actions（測試、建立 Release、上傳 PyPI）

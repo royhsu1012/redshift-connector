@@ -7,4 +7,5 @@ def pytest_runtest_logreport(report):
         title = report.nodeid.replace("::", " > ")
         detail = str(report.longrepr)[-3000:]
         detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-        print(f"\n::error title={title}::{detail}")
+        # 主控台不一定是 UTF-8（Windows runner 是 cp1252），只輸出 ASCII
+        print(f"\n::error title={title}::{detail}".encode("ascii", "backslashreplace").decode())

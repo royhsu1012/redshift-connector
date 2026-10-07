@@ -1,5 +1,6 @@
 import math
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -57,6 +58,8 @@ class FakeConnection:
     def __init__(self, db):
         self._db = db
         self.closed = False
+        self.valid = True
+        self.jconn = SimpleNamespace(isValid=lambda timeout: self.valid)
 
     def cursor(self):
         return FakeCursor(self._db.rows, self._db.columns)
@@ -82,22 +85,35 @@ def db(monkeypatch):
 
 # ---------- 查詢結果 ----------
 
-def test_query_keeps_numbers_and_none(db):
+def test_query_result_types(db):
     df = RedshiftClient("jdbc:redshift://x").query("select 1")
 
     assert list(df.columns) == ["model", "qty", "price", "note", "tags"]
-    assert df["model"].tolist() == ["A1", "B2"]
     assert df["qty"].tolist() == [1, 2]
     assert pd.api.types.is_numeric_dtype(df["price"])
     assert df["price"][0] == 1.5 and math.isnan(df["price"][1])
-    # NULL 維持缺值；實際是 None 還是 NaN 由 pandas 版本決定
-    assert pd.isna(df["note"][0]) and df["note"][1] == "z"
-    assert df["tags"][0] == "xy" and pd.isna(df["tags"][1])
+    # 文字欄：去空白的字串，NULL 是 None，型別是 object
+    assert df["model"].tolist() == ["A1", "B2"]
+    assert df["note"].tolist() == [None, "z"]
+    assert df["tags"].tolist() == ["xy", None]
+    assert df["model"].dtype == object and df["note"].dtype == object
+
+
+def test_text_columns_do_not_depend_on_pandas_version(db):
+    """jaydebeapi 把日期轉成 Python 字串；讓 pandas 3 自行推斷的話，這種欄位的 None 會變成 NaN。"""
+    db.columns = ["day"]
+    db.rows = [("2026-01-01",), (None,)]
+
+    df = RedshiftClient("jdbc:redshift://x").query("select 1")
+
+    assert df["day"].dtype == object
+    assert df["day"].tolist() == ["2026-01-01", None]
 
 
 def test_all_str_matches_0_1_behaviour(db):
     df = RedshiftClient("jdbc:redshift://x").query("select 1", all_str=True)
 
+    assert df["model"].tolist() == ["A1", "B2"]
     assert df["qty"].tolist() == ["1", "2"]
     assert df["price"].tolist() == ["1.5", "nan"]
     assert df["note"].tolist() == ["None", "z"]
@@ -106,12 +122,36 @@ def test_all_str_matches_0_1_behaviour(db):
 
 def test_chunked_result_equals_single_fetch(db):
     db.columns = ["id", "name"]
-    db.rows = [(i, f" n{i} ") for i in range(10)]
+    db.rows = [(i, JavaString(f" n{i} ")) for i in range(10)]
 
     whole = RedshiftClient("jdbc:redshift://x").query("select 1")
     chunked = RedshiftClient("jdbc:redshift://x").query("select 1", chunk_size=3)
 
     pd.testing.assert_frame_equal(whole, chunked)
+
+
+def test_chunk_holding_only_nulls_does_not_change_the_types(db):
+    """第一批的 amount 整欄都是 NULL：分批的結果仍要和一次讀完相同。"""
+    db.columns = ["id", "amount", "name"]
+    db.rows = [(1, None, None), (2, None, None), (3, 1.5, JavaString("a")), (4, 2.5, None)]
+
+    whole = RedshiftClient("jdbc:redshift://x").query("select 1")
+    chunked = RedshiftClient("jdbc:redshift://x").query("select 1", chunk_size=2)
+
+    pd.testing.assert_frame_equal(whole, chunked)
+    assert pd.api.types.is_float_dtype(chunked["amount"])
+    assert chunked["name"].tolist() == [None, None, "a", None]
+
+
+def test_duplicate_column_names_are_kept_apart(db):
+    db.columns = ["id", "id"]
+    db.rows = [(1, JavaString("a")), (2, JavaString("b"))]
+
+    for chunk_size in (None, 1):
+        df = RedshiftClient("jdbc:redshift://x").query("select a.id, b.id", chunk_size=chunk_size)
+        assert list(df.columns) == ["id", "id"]
+        assert df.iloc[:, 0].tolist() == [1, 2]
+        assert df.iloc[:, 1].tolist() == ["a", "b"]
 
 
 def test_empty_result_keeps_columns(db):
@@ -141,6 +181,16 @@ def test_connection_is_opened_once_and_reused(db):
     assert first.closed
     client.query("select 3")
     assert len(db.connects) == 2      # close 之後才會重新連線
+
+
+def test_dropped_connection_is_replaced(db):
+    client = RedshiftClient("jdbc:redshift://x")
+    client.query("select 1")
+
+    db.conn.valid = False             # 伺服器中斷了連線（閒置過久、登入逾期）
+    df = client.query("select 2")
+
+    assert len(db.connects) == 2 and len(df) == 2
 
 
 def test_defaults_use_bundled_driver_and_auto_jvm(db):
@@ -262,5 +312,31 @@ def test_bundled_driver_works_in_a_real_jvm():
     )
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, timeout=180
+    )
+    assert result.returncode == 0 and "OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_java
+def test_driver_loads_from_a_path_with_spaces_and_non_ascii_characters(tmp_path):
+    """套件裝在中文使用者名稱、或含空白的路徑底下時，驅動也要能載入。"""
+    jar_dir = tmp_path / "使用者 王小明 Renée" / "jars"
+    shutil.copytree(connector._JAR_DIR, jar_dir)
+    code = textwrap.dedent(
+        """
+        import glob, os, sys
+        from redshift_connector_bade import RedshiftClient
+
+        jars = sorted(glob.glob(os.path.join(sys.argv[1], "*.jar")))
+        try:
+            RedshiftClient("jdbc:redshift://127.0.0.1:1/dev?user=u&password=p", jars=jars).query("select 1")
+        except Exception as e:
+            assert "refused" in str(e), e
+        else:
+            raise SystemExit("connected to a closed port?")
+        print("OK")
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(jar_dir)], cwd=REPO_ROOT, capture_output=True, text=True, timeout=180
     )
     assert result.returncode == 0 and "OK" in result.stdout, result.stdout + result.stderr
