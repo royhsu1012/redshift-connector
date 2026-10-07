@@ -249,38 +249,99 @@ def _java_available():
         return False
 
 
-needs_java = pytest.mark.skipif(not _java_available(), reason="需要安裝 Java")
+needs_java = pytest.mark.skipif(not _java_available(), reason="需要可用的 Java")
 
 
-def _jpype_finds_nothing():
-    raise jpype.JVMNotFoundException("simulated")
+# ---------- 尋找 Java ----------
+
+def _fake_java(tmp_path, name, version):
+    """做一個只有 release 檔與空 jvm.dll 的假 Java 安裝目錄。"""
+    home = tmp_path / name
+    (home / "bin" / "server").mkdir(parents=True)
+    if version:
+        (home / "release").write_text(f'IMPLEMENTOR="Test"\nJAVA_VERSION="{version}"\n', encoding="utf-8")
+    jvm = home / "bin" / "server" / "jvm.dll"
+    jvm.write_bytes(b"")
+    return str(jvm)
 
 
-@needs_java
-def test_find_jvm_falls_back_when_jpype_detection_fails(monkeypatch):
-    """模擬只把 java 放進 PATH、或剛裝完 Java 的機器：JPype 自己找不到，仍要能找到 JVM。"""
-    monkeypatch.setattr(connector.jpype, "getDefaultJVMPath", _jpype_finds_nothing)
-
-    assert os.path.isfile(connector.find_jvm())
+def _installed(monkeypatch, jvms, jpype_needs):
+    monkeypatch.setattr(connector, "_jvm_candidates", lambda: iter(jvms))
+    monkeypatch.setattr(connector, "_jpype_min_java", lambda: jpype_needs)
 
 
-def test_find_jvm_reports_missing_java(monkeypatch):
-    monkeypatch.setattr(connector.jpype, "getDefaultJVMPath", _jpype_finds_nothing)
-    monkeypatch.setattr(connector.shutil, "which", lambda name: None)
-    monkeypatch.delenv("ProgramFiles", raising=False)
+def test_java_version_is_read_from_the_release_file(tmp_path):
+    assert connector._java_version(_fake_java(tmp_path, "jre8", "1.8.0_451")) == 8
+    assert connector._java_version(_fake_java(tmp_path, "jre21", "21.0.4")) == 21
+    assert connector._java_version(_fake_java(tmp_path, "unknown", None)) is None
+
+
+def test_jpype_requirement_is_read_from_the_installed_jpype():
+    assert connector._jpype_min_java() >= 8
+
+
+def test_default_java_is_used_when_it_is_new_enough(monkeypatch, tmp_path):
+    java8, java21 = _fake_java(tmp_path, "jre8", "1.8.0_451"), _fake_java(tmp_path, "jre21", "21.0.4")
+    _installed(monkeypatch, [java8, java21], jpype_needs=8)
+
+    assert connector.find_jvm() == java8
+
+
+def test_java_too_old_for_jpype_is_skipped(monkeypatch, tmp_path):
+    """JAVA_HOME 指向 Java 8，但新版 JPype 需要 Java 9 以上：改用電腦上較新的 Java。"""
+    java8, java21 = _fake_java(tmp_path, "jre8", "1.8.0_451"), _fake_java(tmp_path, "jre21", "21.0.4")
+    _installed(monkeypatch, [java8, java21], jpype_needs=9)
+
+    assert connector.find_jvm() == java21
+
+
+def test_only_a_too_old_java_gives_a_clear_message(monkeypatch, tmp_path):
+    _installed(monkeypatch, [_fake_java(tmp_path, "jre8", "1.8.0_451")], jpype_needs=9)
+
+    with pytest.raises(RuntimeError, match="第 8 版.*需要 Java 9 以上"):
+        connector.find_jvm()
+
+
+def test_missing_java_gives_a_clear_message(monkeypatch):
+    _installed(monkeypatch, [], jpype_needs=9)
 
     with pytest.raises(RuntimeError, match="找不到 Java"):
         connector.find_jvm()
 
 
-@needs_java
-def test_self_check_command():
+def test_java_is_found_without_jpype_detection(monkeypatch):
+    """只把 java 放進 PATH、或剛裝完 Java 的機器：JPype 自己找不到，仍要列得出 JVM。"""
+    def jpype_finds_nothing():
+        raise jpype.JVMNotFoundException("simulated")
+
+    if not (shutil.which("java") or os.environ.get("ProgramFiles")):
+        pytest.skip("這台機器沒有其他找得到 Java 的途徑")
+    monkeypatch.setattr(connector.jpype, "getDefaultJVMPath", jpype_finds_nothing)
+
+    found = list(connector._jvm_candidates())
+    assert found and all(os.path.isfile(path) for path in found)
+
+
+def test_self_check_reports_unusable_java(monkeypatch, capsys):
+    from redshift_connector_bade import __main__ as self_check
+
+    _installed(monkeypatch, [], jpype_needs=9)
+
+    assert self_check.main(["prog"]) == 2      # install.bat 看到 2 就會安裝 Java
+    assert "找不到 Java" in capsys.readouterr().out
+
+
+def test_self_check_command_never_crashes():
+    """不論這台機器的 Java 能不能用，自我檢查都要給出結論，不能丟出 traceback。"""
     result = subprocess.run(
         [sys.executable, "-m", "redshift_connector_bade"],
         cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", timeout=180,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "驅動載入成功" in result.stdout
+    assert "Traceback" not in result.stderr, result.stderr
+    if _java_available():
+        assert result.returncode == 0 and "驅動載入成功" in result.stdout, result.stdout
+    else:
+        assert result.returncode == 2 and "Java" in result.stdout, result.stdout
 
 
 @needs_java

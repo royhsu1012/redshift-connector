@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import zipfile
 
 import jpype
 import jaydebeapi
@@ -20,13 +21,42 @@ def bundled_jars():
     return sorted(glob.glob(os.path.join(_JAR_DIR, "*.jar")))
 
 
-def find_jvm():
+def _jpype_min_java():
     """
-    自動尋找 JVM，回傳 jvm.dll / libjvm 的路徑；找不到時拋出 RuntimeError。
+    目前安裝的 JPype 需要的最低 Java 版本；無法判斷時回傳 None。
+
+    JPype 1.5 支援 Java 8，1.7 起需要 Java 9 以上。這裡不寫死對照表，
+    直接看 JPype 自帶的 jar 是用哪一版 Java 編譯的。
     """
+    jar = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(jpype.__file__))), "org.jpype.jar")
+    try:
+        with zipfile.ZipFile(jar) as z:
+            classes = [n for n in z.namelist() if n.endswith(".class") and not n.startswith("META-INF/")]
+            majors = [int.from_bytes(z.open(n).read(8)[6:8], "big") for n in classes]
+        return max(majors) - 44     # class 檔版本 52 = Java 8、53 = Java 9 ...
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return None
+
+
+def _java_version(jvm_path):
+    """由 JVM 的路徑往上找 Java 安裝目錄的 release 檔，回傳主版本號（8、17、21 ...）；無法判斷時回傳 None。"""
+    folder = os.path.dirname(jvm_path)
+    for _ in range(5):
+        folder = os.path.dirname(folder)
+        release = os.path.join(folder, "release")
+        if os.path.isfile(release):
+            with open(release, encoding="utf-8", errors="replace") as f:
+                match = re.search(r'JAVA_VERSION="(\d+)(?:\.(\d+))?', f.read())
+            if match:       # Java 8 寫成 "1.8.0_451"，之後寫成 "21.0.4"
+                return int(match.group(2) if match.group(1) == "1" else match.group(1))
+    return None
+
+
+def _jvm_candidates():
+    """依序列出這台電腦上找得到的 JVM（jvm.dll / libjvm 的路徑）。"""
     # 1. JPype 內建的偵測：JAVA_HOME、Windows 登錄檔、各平台的慣用位置
     try:
-        return jpype.getDefaultJVMPath()
+        yield jpype.getDefaultJVMPath()
     except jpype.JVMNotFoundException:
         pass
 
@@ -39,19 +69,38 @@ def find_jvm():
         if match:
             home = match.group(1).strip()
             for pattern in ("bin/server/jvm.dll", "lib/server/libjvm.*", "lib/*/server/libjvm.*"):
-                found = sorted(glob.glob(os.path.join(home, *pattern.split("/"))))
-                if found:
-                    return found[-1]
+                yield from sorted(glob.glob(os.path.join(home, *pattern.split("/"))))
 
-    # 3. Windows 剛裝完 Java、PATH 還沒更新時：直接找 Program Files
+    # 3. Windows 上其他已安裝的 Java，新版優先。JAVA_HOME 指向舊版、或剛裝完 PATH 還沒更新時會用到
     program_files = os.environ.get("ProgramFiles")
     if program_files:
+        found = []
         for pattern in ("*/*/bin/server/jvm.dll", "*/*/jre/bin/server/jvm.dll"):
-            found = sorted(glob.glob(os.path.join(program_files, *pattern.split("/"))))
-            if found:
-                return found[-1]
+            found += glob.glob(os.path.join(program_files, *pattern.split("/")))
+        yield from sorted(found, key=lambda path: _java_version(path) or 0, reverse=True)
 
-    raise RuntimeError("找不到 Java。請安裝 Java 8 以上版本，或設定 JAVA_HOME，或傳入 jvm_path。")
+
+def find_jvm():
+    """
+    自動尋找可用的 JVM，回傳 jvm.dll / libjvm 的路徑；找不到時拋出 RuntimeError。
+
+    會略過對目前安裝的 JPype 來說太舊的 Java，改用電腦上其他較新的版本。
+    """
+    required = _jpype_min_java()
+    too_old = []
+    for path in _jvm_candidates():
+        version = _java_version(path)
+        if required is None or version is None or version >= required:
+            return path
+        too_old.append(version)
+
+    if too_old:
+        raise RuntimeError(
+            f"找到的 Java 是第 {max(too_old)} 版，但目前安裝的 JPype {jpype.__version__} 需要 Java {required} 以上。"
+            f"請安裝新版 Java（舊版不必移除；執行 install.bat 會自動安裝），"
+            f"或改裝支援 Java 8 的 JPype：pip install jpype1==1.5.2"
+        )
+    raise RuntimeError("找不到 Java。請安裝 Java（執行 install.bat 會自動安裝），或設定 JAVA_HOME，或傳入 jvm_path。")
 
 
 def _start_jvm(jvm_path, jars):

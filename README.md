@@ -29,7 +29,9 @@ df = rs.query("select * from my_table limit 10")
 
 ## 安裝
 
-需要 Python 3.8 以上，以及 Java 8 以上（只要裝好即可，不必設定路徑）。
+需要 Python 3.8 以上與 Java。Java 只要裝好即可，不必設定路徑；電腦上有多個版本時會自動選用相容的那一個。
+
+> **只有 Java 8 的電腦**：新版的 JPype（1.7 起）需要 Java 9 以上。執行 `install.bat` 會自動加裝新版 Java，舊版可以保留；不想加裝的話，改裝支援 Java 8 的 JPype 也可以：`pip install jpype1==1.5.2`。
 
 ### 一鍵安裝（Windows）
 
@@ -37,7 +39,7 @@ df = rs.query("select * from my_table limit 10")
 
 1. 安裝或升級本套件
 2. 檢查 Java 與內建驅動
-3. 沒有 Java 時，用 `winget` 安裝 Eclipse Temurin JRE 21
+3. 沒有 Java、或 Java 版本太舊時，用 `winget` 安裝 Eclipse Temurin JRE 21（原有的 Java 不會被移除）
 
 套件會裝進目前使用中的 Python。要裝進特定的 conda 環境或 venv，請先啟用該環境，再從那個命令列執行 `install.bat`。
 
@@ -138,7 +140,8 @@ df = fetch_data_from_redshift(jvm_path, jdbc_driver_path, aws_sdk_path, jdbc_url
 
 | 訊息 | 處理方式 |
 |---|---|
-| `找不到 Java` | 安裝 Java 8 以上（或執行 `install.bat`）。已安裝卻仍找不到時，設定環境變數 `JAVA_HOME`，或傳入 `RedshiftClient(url, jvm_path=...)` |
+| `找不到 Java` | 執行 `install.bat`，或自行安裝 Java。已安裝卻仍找不到時，設定環境變數 `JAVA_HOME`，或傳入 `RedshiftClient(url, jvm_path=...)` |
+| `找到的 Java 是第 8 版，但目前安裝的 JPype … 需要 Java 9 以上` | 執行 `install.bat` 加裝新版 Java（舊版可保留），或 `pip install jpype1==1.5.2` |
 | 瀏覽器登入逾時 | 在 `idp_response_timeout` 秒內完成登入；確認 `listen_port` 沒有被其他程式占用 |
 | `Connection refused` / 連線逾時 | 確認已連上公司網路或 VPN |
 | 想用別的驅動版本 | `RedshiftClient(url, jars=[r"C:\path\redshift-jdbc42-x.y.z.jar"])` |

@@ -4,7 +4,7 @@
     python -m redshift_connector_bade                檢查 Java 與內建驅動
     python -m redshift_connector_bade "<JDBC URL>"   再實際連線並查詢一次
 
-結束代碼：0 正常、1 其他錯誤、2 找不到 Java。
+結束代碼：0 正常、1 其他錯誤、2 沒有可用的 Java（未安裝或版本太舊）。
 """
 
 import os
@@ -18,7 +18,7 @@ from .connector import DRIVER_CLASS, _start_jvm, bundled_jars, find_jvm
 
 def main(argv):
     # 輸出被導向檔案或管線時，避免非中文語系的主控台編碼錯誤
-    if not sys.stdout.isatty():
+    if not sys.stdout.isatty() and hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
     print(f"redshift-connector-bade {__version__}")

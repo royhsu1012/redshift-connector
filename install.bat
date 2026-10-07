@@ -5,7 +5,8 @@ rem  redshift-connector-bade : one-click setup for Windows
 rem
 rem    1. installs / upgrades the package (the JDBC driver is bundled inside it)
 rem    2. checks Java and the driver
-rem    3. if Java is missing, installs Eclipse Temurin JRE 21 through winget
+rem    3. if Java is missing or too old, installs Eclipse Temurin JRE 21 through winget
+rem       (an existing older Java is left in place)
 rem
 rem  It installs into whichever Python is active. To target a conda env or a
 rem  venv, activate it first and run this file from that prompt.
@@ -35,7 +36,7 @@ if "%RC%"=="0" goto :ok
 if not "%RC%"=="2" goto :check_failed
 
 echo.
-echo Java was not found. Installing Eclipse Temurin JRE 21 with winget ...
+echo No usable Java was found. Installing Eclipse Temurin JRE 21 with winget ...
 where winget >nul 2>nul || goto :no_winget
 winget install -e --id EclipseAdoptium.Temurin.21.JRE --source winget
 if errorlevel 1 goto :java_failed

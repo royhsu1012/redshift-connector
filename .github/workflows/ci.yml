@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   test:
-    name: test (${{ matrix.os }}, python ${{ matrix.python-version }}, java ${{ matrix.java }})
+    name: test (${{ matrix.os }}, python ${{ matrix.python-version }}, java ${{ matrix.java }}, ${{ matrix.jpype }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -12,10 +12,18 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python-version: ['3.9', '3.12']
         java: ['21']
+        jpype: ['jpype1']
         include:
+          # Java 8 只有 JPype 1.5 支援：許多既有電腦是這個組合
           - os: windows-latest
             python-version: '3.12'
             java: '8'
+            jpype: 'jpype1==1.5.2'
+          # Java 8 配新版 JPype：要改用較新的 Java 或給出明確訊息，不能當掉
+          - os: windows-latest
+            python-version: '3.12'
+            java: '8'
+            jpype: 'jpype1'
 
     steps:
     - name: Checkout code
@@ -35,7 +43,7 @@ jobs:
     - name: Install
       run: |
         python -m pip install --upgrade pip
-        pip install . pytest flake8
+        pip install . pytest flake8 "${{ matrix.jpype }}"
 
     - name: Lint
       run: flake8 redshift_connector_bade tests setup.py --max-line-length=127

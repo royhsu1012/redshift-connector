@@ -8,6 +8,7 @@
 
 - 內建 AWS 官方 Redshift JDBC 驅動 2.1.0.33 與其相依 jar，不必再另外下載
 - 自動偵測 Java，不必再傳 `jvm.dll` 的路徑
+- 電腦上有多個 Java 時自動選用與 JPype 相容的版本；都不相容時說明原因與解法（新版 JPype 需要 Java 9 以上）
 - `RedshiftClient`：多次查詢共用一條連線，瀏覽器登入只需要一次
 - `query_redshift(jdbc_url, query)`：一行完成查詢
 - `chunk_size` 分批讀取大量資料
