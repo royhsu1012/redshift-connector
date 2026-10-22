@@ -158,7 +158,7 @@ pytest
 
 測試不需要資料庫：查詢結果的處理邏輯用假連線測，內建驅動則用真的 JVM 載入、連到本機關閉的 port。
 
-在 Windows 上從原始碼建置（`pip install .`、`python -m build`）時，如果專案放在很深的資料夾，建置途中的檔案路徑可能超過 260 字元而失敗，訊息是 `could not create '...\jars\....jar': No such file or directory`。把專案移到較短的路徑（例如 `C:\srcedshift-connector`），或開啟 Windows 的長路徑支援即可。從 PyPI 或 GitHub Release 安裝的使用者不受影響。
+在 Windows 上從原始碼建置（`pip install .`、`python -m build`）時，如果專案放在很深的資料夾，建置途中的檔案路徑可能超過 260 字元而失敗，訊息是 `could not create '...\jars\....jar': No such file or directory`。把專案移到較短的路徑（例如 `C:\src\redshift-connector`），或開啟 Windows 的長路徑支援即可。從 PyPI 或 GitHub Release 安裝的使用者不受影響。
 
 ### 更新內建的 JDBC 驅動
 
